@@ -8,12 +8,11 @@ import os
 app = Flask(__name__)
 CORS(app)                       # erlaubt Requests vom Desktop-Client
 
-# Datenbank-Datei im gleichen Ordner (Clever Cloud lässt Schreibzugriff zu)
+# Datenbank-Datei im gleichen Ordner (Clever Cloud erlaubt Schreibzugriff)
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_system.db")
 
 # ---------- Hilfsfunktionen ----------
 def dict_factory(cursor, row):
-    """Wandelt SQLite-Zeile in Dict um"""
     return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
 
 def get_db():
@@ -22,15 +21,15 @@ def get_db():
     return con
 
 def init_db():
-    """Erstellt Tabellen, falls sie nicht existieren"""
+    """Erstellt Tabellen + Default-Admin, falls nicht vorhanden"""
     with get_db() as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS news (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                title       TEXT NOT NULL,
-                content     TEXT NOT NULL,
-                author      TEXT NOT NULL,
-                created_date TEXT NOT NULL,
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                title         TEXT NOT NULL,
+                content       TEXT NOT NULL,
+                author        TEXT NOT NULL,
+                created_date  TEXT NOT NULL,
                 modified_date TEXT
             )
         """)
@@ -46,18 +45,21 @@ def init_db():
         if cur["COUNT(*)"] == 0:
             import hashlib
             pw_hash = hashlib.sha256("BAxd0800..??".encode()).hexdigest()
-            con.execute("INSERT INTO admins(username, password) VALUES (?,?)",
+            con.execute("INSERT OR IGNORE INTO admins(username, password) VALUES (?,?)",
                         ("Frank", pw_hash))
         con.commit()
 
 # ---------- Routes ----------
+@app.route("/")
+def hello():
+    """Test-Route – zeigt, dass Flask läuft"""
+    return "Flask läuft! News unter /news", 200
+
 @app.route("/news", methods=["GET"])
 def get_news():
     """Alle News abrufen (neueste zuerst)"""
     with get_db() as con:
-        rows = con.execute(
-            "SELECT * FROM news ORDER BY created_date DESC"
-        ).fetchall()
+        rows = con.execute("SELECT * FROM news ORDER BY created_date DESC").fetchall()
     return jsonify(rows)
 
 @app.route("/news/<int:news_id>", methods=["GET"])
@@ -112,8 +114,10 @@ def delete_news(news_id):
     return jsonify({"status": "deleted"})
 
 # ---------- Start ----------
+# Immer ausführen (auch unter uWSGI/Clever Cloud)
+init_db()
+
 if __name__ == "__main__":
-    init_db()                       # Tabellen/Admin anlegen
-    # Clever Cloud setzt PORT per Umgebungsvariable
+    # Nur für lokales Testen
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
